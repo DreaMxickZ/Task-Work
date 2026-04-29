@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import {
   ArrowLeft, Edit2, Trash2, Plus, ImageIcon, Send, Loader2,
-  Layers, MessageSquare, X, ExternalLink
+  Layers, MessageSquare, X, ExternalLink, Check
 } from 'lucide-react'
 import PageHeader from '../components/PageHeader'
 import TaskModal from '../components/TaskModal'
@@ -27,6 +27,12 @@ export default function TaskDetailPage() {
   const [logType, setLogType] = useState('progress')
   const [pendingFiles, setPendingFiles] = useState([])
   const [posting, setPosting] = useState(false)
+
+  // สำหรับแก้ไข log
+  const [editingLogId, setEditingLogId] = useState(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [editingType, setEditingType] = useState('progress')
+  const [savingEdit, setSavingEdit] = useState(false)
 
   const [newVersionOpen, setNewVersionOpen] = useState(false)
 
@@ -132,6 +138,40 @@ export default function TaskDetailPage() {
   const deleteLog = async (logId) => {
     if (!confirm('ลบ log นี้?')) return
     await supabase.from('progress_logs').delete().eq('id', logId)
+    await load()
+  }
+
+  // เริ่มแก้ไข log
+  const startEditLog = (log) => {
+    setEditingLogId(log.id)
+    setEditingContent(log.content)
+    setEditingType(log.log_type)
+  }
+
+  // ยกเลิกการแก้ไข
+  const cancelEditLog = () => {
+    setEditingLogId(null)
+    setEditingContent('')
+    setEditingType('progress')
+  }
+
+  // บันทึกการแก้ไข
+  const saveEditLog = async () => {
+    if (!editingContent.trim()) return
+    setSavingEdit(true)
+    const { error } = await supabase
+      .from('progress_logs')
+      .update({
+        content: editingContent.trim(),
+        log_type: editingType,
+      })
+      .eq('id', editingLogId)
+    setSavingEdit(false)
+    if (error) {
+      alert('แก้ไขไม่สำเร็จ: ' + error.message)
+      return
+    }
+    cancelEditLog()
     await load()
   }
 
@@ -407,29 +447,88 @@ export default function TaskDetailPage() {
             filteredLogs.map(log => {
               const logAtt = getLogAttachments(log.id)
               const v = log.version_id ? versions.find(x => x.id === log.version_id) : null
+              const isEditing = editingLogId === log.id
               return (
                 <div key={log.id} className="card p-4 group">
                   <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className={`chip ${
-                        log.log_type === 'milestone' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' :
-                        log.log_type === 'issue' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' :
-                        log.log_type === 'note' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' :
-                        'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
-                      }`}>
-                        {log.log_type}
-                      </span>
+                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                      {isEditing ? (
+                        <select
+                          value={editingType}
+                          onChange={e => setEditingType(e.target.value)}
+                          className="text-xs bg-ink-50 dark:bg-ink-800 border border-ink-200 dark:border-ink-700 rounded-md px-2 py-1"
+                        >
+                          <option value="progress">Progress</option>
+                          <option value="note">Note</option>
+                          <option value="milestone">Milestone</option>
+                          <option value="issue">Issue</option>
+                        </select>
+                      ) : (
+                        <span className={`chip ${
+                          log.log_type === 'milestone' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' :
+                          log.log_type === 'issue' ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' :
+                          log.log_type === 'note' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' :
+                          'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                        }`}>
+                          {log.log_type}
+                        </span>
+                      )}
                       {v && <span className="text-ink-500">v{v.version_number}</span>}
                       <span className="text-ink-500">{format(new Date(log.created_at), 'd MMM yy, HH:mm')}</span>
                     </div>
-                    <button
-                      onClick={() => deleteLog(log.id)}
-                      className="text-ink-300 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+
+                    {/* ปุ่ม action: แก้ไข / ลบ / save / cancel */}
+                    {isEditing ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={cancelEditLog}
+                          disabled={savingEdit}
+                          className="text-ink-500 hover:text-ink-900 dark:hover:text-white p-1"
+                          title="ยกเลิก"
+                        >
+                          <X size={14} />
+                        </button>
+                        <button
+                          onClick={saveEditLog}
+                          disabled={savingEdit || !editingContent.trim()}
+                          className="text-emerald-600 hover:text-emerald-700 disabled:opacity-50 p-1"
+                          title="บันทึก"
+                        >
+                          {savingEdit ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => startEditLog(log)}
+                          className="text-ink-300 hover:text-ink-700 dark:hover:text-ink-300 p-1"
+                          title="แก้ไข"
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          onClick={() => deleteLog(log.id)}
+                          className="text-ink-300 hover:text-red-600 p-1"
+                          title="ลบ"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  <p className="text-sm whitespace-pre-wrap mb-2">{log.content}</p>
+
+                  {isEditing ? (
+                    <textarea
+                      autoFocus
+                      rows={4}
+                      value={editingContent}
+                      onChange={e => setEditingContent(e.target.value)}
+                      className="input resize-none mb-2"
+                      placeholder="เขียนรายละเอียด..."
+                    />
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap mb-2">{log.content}</p>
+                  )}
                   {logAtt.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-3">
                       {logAtt.map(a => (
